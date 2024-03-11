@@ -195,7 +195,8 @@ void exec_msg(uint8_t *reg, int width, struct msg *msg) {
 			printf("[??:W");
 			for (size_t i = 0; i < width; ++i)
 				printf(" %02hhx", reg[i]);
-			printf("] ");
+			printf("]\n");
+			printf("      msg ");
 		}
 		printf("[??:R%d", msg->len);
 	} else {

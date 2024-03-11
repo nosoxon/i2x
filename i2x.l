@@ -48,11 +48,13 @@ static int read_encountered = 0;
 }
 
 %%
-
+#include "ast.h"
 
 
 int parse_plain_hex() {
 	if (read_encountered || yyleng % 2) {
+		if (!read_encountered && yyleng > 2)
+			fprintf(stderr, "warning: literal `%s' will not be parsed as hex", yytext);
 		read_encountered = 0;
 		/* fprintf(stderr, "len must be mult 2 %s[%d]\n", yytext, yyleng); */
 		return 0;
@@ -66,17 +68,19 @@ int parse_plain_hex() {
 	for (size_t i = 0; i < len; ++i)
 		sscanf(yytext + 2*i, "%2hhx", buf + i);
 
-	struct const_hex* v = malloc(sizeof(struct const_hex));
-	v->len = len;
-	v->buf = buf;
+	struct node *n = malloc(sizeof(struct node));
+	n->type = T_HEX;
+	n->lval.x = buf;
+	n->rval.n = NULL;
+	n->len = len;
 
-	yylval.hex = v;
+	yylval.node = n;
 	return 1;
 }
 
 void parse_decimal() {
 	uint8_t width = 1;
-	int little_endian = 1; /* default LE for now */
+	int big_endian = 0; /* default LE for now */
 
 	size_t pos = 0;
 
@@ -87,37 +91,34 @@ void parse_decimal() {
 		pos = 1;
 
 	if (pos > 0)
-		little_endian = !!(yytext[pos - 1] & 32);
-	
-
-	int host_endian = (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
+		big_endian = !(yytext[pos - 1] & 32);
 
 	uint64_t val = strtoull(yytext + pos, NULL, 10);
-	/* fprintf(stderr, "yyleng=%d,yytext+pos=%s,val=%"PRIu64"\n", yyleng, yytext + pos, val); */
-	/* if (width > 1 && little_endian ^ host_endian) {
-		if ()
-		switch (width) {
-		case 2:
 
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-			if ()
-#else
-#endif
-		}
-		if (little_endian)
-			htonl(val)
-	} */
+	struct node *n = malloc(sizeof(struct node));
+	n->type = T_DEC;
+	n->lval.x = encode_dec(val, width, big_endian);
+	n->rval.flags.big_endian = big_endian;
+	n->rval.flags.val = val;
+	n->len = width;
 
-	// endptr check
-	/* if (val > 255) {
-		fprintf(stderr, "please use a width specifier\n");
-		exit(1);
-	} */
-
-	struct const_dec* v = malloc(sizeof(struct const_dec));
-	v->flags =
-		(little_endian ? 0 : F_DEC_BIG_ENDIAN) | width;
-	v->val = val;
-
-	yylval.dec = v;
+	yylval.node = n;
 }
+
+uint8_t *encode_dec(uint64_t val, int width, int big_endian) {
+	/* int big_endian = !!(dec->flags & F_DEC_BIG_ENDIAN);
+	int width = dec->flags & F_DEC_WIDTH_MASK; */
+	if (width < 1)
+		die(1, "width must be at least 1");
+	if (width > 8)
+		die(1, "greater than qword unsupported for now");
+	if (val >> 8 * width)
+		die(1, "decimal %"PRIu64" wider than %d bytes", width);
+
+	uint8_t *buf = malloc(width);
+	for (size_t b = 0; b < width; ++b)
+		buf[big_endian ? width-1 - b : b] = (val >> 8 * b) & 0xff;
+
+	return buf;
+}
+

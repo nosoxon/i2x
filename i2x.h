@@ -4,7 +4,7 @@
 struct const_dec {
 	/*              WWWE */
 	uint8_t		flags;
-#define F_DEC_BIG_ENDIAN	(1 << 7)
+#define F_DEC_BIG_ENDIAN	(1 << 31)
 #define F_DEC_WIDTH_MASK	(~F_DEC_BIG_ENDIAN)
 	uint64_t 	val;
 };
