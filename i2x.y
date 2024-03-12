@@ -108,13 +108,14 @@ void iprintf(int indent, const char* fmt, ...) {
 	va_end(ap);
 }
 
-void dump_msg_list(struct i2x_list *msg_list) {
-	iprintf(4, "i2x_list(i2x_msg)");
+void dump_msg_list(struct i2x_list *msg_list)
+{
+	iprintf(4, "i2x_list(i2x_msg)\n");
 	for (size_t i = 0; i < msg_list->len; ++i) {
 		struct i2x_msg *msg = msg_list->array[i];
 		iprintf(6, "i2x_msg [%s%d]",
 			msg->flags & F_MSG_RD ? "R" : "W", msg->len);
-		if (!msg->flags)
+		if (!(msg->flags & F_MSG_RD))
 			for (size_t j = 0; j < msg->len; ++j)
 				printf(" %02hhx", msg->buf[j]);
 		printf(" [%s]\n", msg->flags & F_MSG_STOP ? "P" : "Sr");
@@ -126,15 +127,13 @@ void dump_reg_spec(struct i2x_list *reg_spec)
 	iprintf(4, "i2x_list(i2x_regrange)\n");
 	for (size_t i = 0; i < reg_spec->len; ++i) {
 		struct i2x_regrange *regrange = reg_spec->array[i];
-		iprintf(6, "i2x_regrange\n");
-		iprintf(8, "");
+		iprintf(6, "i2x_regrange [");
 		for (size_t j = 0; j < regrange->len; ++j)
 			printf("%02hhx", regrange->lower[j]);
-		puts("");
-		iprintf(8, "");
+		printf("-");
 		for (size_t j = 0; j < regrange->len; ++j)
 			printf("%02hhx", regrange->upper[j]);
-		puts("");
+		puts("]");
 	}
 }
 
