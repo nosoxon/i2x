@@ -27,17 +27,28 @@ void dump_cmd_list(struct i2x_list *cmd_list);
 prog: cmd_list	{ dump_cmd_list($1); };
 
 cmd_list
-	: cmd				{ $$ = i2x_list_make($1); }
+	: cmd				{
+		struct i2x_list *list = i2x_list_make();
+		$$ = i2x_list_extend(list, $1);
+	}
 	| cmd_list '/' cmd		{ $$ = i2x_list_extend($1, $3); }
 	;
 
 cmd
-	: msg_list			{ $$ = i2x_cmd_make($1, NULL); }
-	| reg_spec msg_list		{ $$ = i2x_cmd_make($2, $1); }
-	;
+	: msg_list			{
+		$$ = i2x_cmd_make($1, NULL);
+		i2x_list_free($1);
+	}
+	| reg_spec msg_list		{
+		$$ = i2x_cmd_make($2, $1);
+		i2x_list_free($2);
+	};
 
 msg_list
-	: msg				{ $$ = i2x_list_make($1); }
+	: msg				{
+		struct i2x_list *list = i2x_list_make();
+		$$ = i2x_list_extend(list, $1);
+	}
 	| msg_list msg			{
 		struct i2x_msg *m = i2x_list_get($1, $1->len - 1);
 		/* implicit: repeated start if RAW, else stop */
@@ -74,7 +85,10 @@ reg_spec
 	;
 
 regrange_list
-	: regrange			{ $$ = i2x_list_make($1); }
+	: regrange			{
+		struct i2x_list *list = i2x_list_make();
+		$$ = i2x_list_extend(list, $1);
+	}
 	| regrange_list ',' regrange	{ $$ = i2x_list_extend($1, $3); }
 	;
 
@@ -109,17 +123,32 @@ void iprintf(int indent, const char* fmt, ...) {
 	va_end(ap);
 }
 
-void dump_msg_list(struct i2x_list *msg_list)
+void dump_segment(struct i2x_segment *segment, int reg_width)
 {
-	iprintf(4, "i2x_list(i2x_msg)\n");
-	for (size_t i = 0; i < msg_list->len; ++i) {
-		struct i2x_msg *msg = msg_list->array[i];
-		iprintf(6, "i2x_msg [%s%d]",
-			msg->flags & F_MSG_RD ? "R" : "W", msg->len);
-		if (!(msg->flags & F_MSG_RD))
-			for (size_t j = 0; j < msg->len; ++j)
-				printf(" %02hhx", msg->buf[j]);
-		printf(" [%s]\n", msg->flags & F_MSG_STOP ? "P" : "Sr");
+	iprintf(6, "i2x_segment [%d]\n", segment->msgset.nmsgs);
+	for (size_t i = 0; i < segment->msgset.nmsgs; ++i) {
+		struct i2c_msg *msg = segment->msgset.msgs + i;
+		iprintf(8, "i2c_msg [%s%3d]",
+			msg->flags & I2C_M_RD ? "R" : "W", msg->len);
+
+		if (!(msg->flags & I2C_M_RD)) {
+			for (size_t j = 0; j < msg->len; ++j) {
+				if (j < reg_width && msg->flags & F_MSG_REG)
+					printf(" rr");
+				else
+					printf(" %02hhx", msg->buf[j]);
+			}
+		}
+		puts("");
+	}
+}
+
+void dump_segment_list(struct i2x_list *segment_list, int reg_width)
+{
+	iprintf(4, "i2x_list(i2x_segment)\n");
+	for (size_t i = 0; i < segment_list->len; ++i) {
+		struct i2x_segment *seg = i2x_list_get(segment_list, i);
+		dump_segment(seg, reg_width);
 	}
 }
 
@@ -127,12 +156,12 @@ void dump_reg_spec(struct i2x_list *reg_spec)
 {
 	iprintf(4, "i2x_list(i2x_regrange)\n");
 	for (size_t i = 0; i < reg_spec->len; ++i) {
-		struct i2x_regrange *regrange = reg_spec->array[i];
+		struct i2x_regrange *regrange = i2x_list_get(reg_spec, i);
 		iprintf(6, "i2x_regrange [");
-		for (size_t j = 0; j < regrange->len; ++j)
+		for (size_t j = 0; j < regrange->width; ++j)
 			printf("%02hhx", regrange->lower[j]);
 		printf("-");
-		for (size_t j = 0; j < regrange->len; ++j)
+		for (size_t j = 0; j < regrange->width; ++j)
 			printf("%02hhx", regrange->upper[j]);
 		puts("]");
 	}
@@ -142,11 +171,14 @@ void dump_cmd_list(struct i2x_list *cmd_list)
 {
 	iprintf(0, "i2x_list(i2x_cmd)\n");
 	for (size_t i = 0; i < cmd_list->len; ++i) {
-		struct i2x_cmd *cmd = cmd_list->array[i];
+		struct i2x_cmd *cmd = i2x_list_get(cmd_list, i);
 		iprintf(2, "i2x_cmd\n");
 		if (cmd->reg_spec)
 			dump_reg_spec(cmd->reg_spec);
-		dump_msg_list(cmd->msg_list);
+		size_t width = cmd->reg_spec ?
+			((struct i2x_regrange *) i2x_list_get(cmd->reg_spec, 0))
+				->width : 0;
+		dump_segment_list(cmd->segment_list, width);
 	}
 }
 
