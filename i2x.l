@@ -16,6 +16,10 @@ void parse_decimal();
 static int read_encountered = 0;
 %}
 
+%option noyywrap
+/*%option noyywrap nounput noinput nodefault*/
+/*%option noyyalloc noyyrealloc noyyfree*/
+
 %%
 
 "r"			{

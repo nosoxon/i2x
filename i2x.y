@@ -1,5 +1,6 @@
 %{
 #include "i2x.h"
+#include "i2x.yy.h"
 
 void dump_cmd_list(struct i2x_list *cmd_list);
 %}
@@ -147,4 +148,8 @@ void dump_cmd_list(struct i2x_list *cmd_list)
 			dump_reg_spec(cmd->reg_spec);
 		dump_msg_list(cmd->msg_list);
 	}
+}
+
+void yyerror(char *s) {
+	fprintf(stderr, "error: %s\n", s);
 }
