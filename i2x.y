@@ -1,111 +1,104 @@
 %{
-#include <stdio.h>
-#include <inttypes.h>
 #include "i2x.h"
-#include "ast.h"
 
-struct ast_node* ast_node_make(int type, void* lval, void* rval, size_t len);
-struct ast_node* ast_list_extend(struct ast_node* head, struct ast_node* val);
-
-void dump_ast(int indent, struct ast_node* node, int first);
+void dump_cmd_list(struct i2x_list *cmd_list);
 %}
 
 %union {
-	// struct const_dec*	dec;
-	// struct const_hex*	hex;
-	// struct ast_node*	node;
-	struct node*	node;
+	struct i2x_literal	*literal;
+	struct i2x_regrange	*regrange;
+	struct i2x_msg		*msg;
+	struct i2x_cmd		*cmd;
+	struct i2x_list		*list;
 }
 
 %token WRITE READ
-%token <node> PHEX DECIMAL
+%token <literal> PHEX DECIMAL
 
-%type <node> reg_expr reg_expr_list reg_spec
-%type <node> const data_expr msg msg_list cmd cmd_list
+%type <literal> const data_expr
+%type <regrange> regrange
+%type <msg> msg
+%type <cmd> cmd
+%type <list> regrange_list reg_spec msg_list cmd_list
 
 %%
 
-prog: cmd_list	{
-		dump_ast(0, $1, 1);
-		struct prog *p = xlate_prog($1);
-		exec_prog(p);
-	};
+prog: cmd_list	{ dump_cmd_list($1); };
 
 cmd_list
-	: cmd				{ $$ = inode_make(T_CMD_LIST, $1, NULL, 1); }
-	| cmd_list '/' cmd		{ $$ = inode_extend($1, $3); }
+	: cmd				{ $$ = i2x_list_make($1); }
+	| cmd_list '/' cmd		{ $$ = i2x_list_extend($1, $3); }
 	;
 
 cmd
-	: msg_list			{ $$ = inode_make(T_CMD, $1, NULL, 1); }
-	| reg_spec msg_list		{ $$ = inode_make(T_CMD, $2, $1, 1); }
+	: msg_list			{ $$ = i2x_cmd_make($1, NULL); }
+	| reg_spec msg_list		{ $$ = i2x_cmd_make($2, $1); }
 	;
 
 msg_list
-	: msg				{ $$ = inode_make(T_MSG, $1, NULL, 1); }
-	| msg_list msg			{ $$ = inode_extend($1, $2); }
-	| msg_list ',' msg		{ inode_extend($1,
-						inode_make(T_REP_START, NULL, NULL, 1));
-					  $$ = inode_extend($1, $3); }
-	| msg_list '.' msg		{ inode_extend($1,
-						inode_make(T_STOP, NULL, NULL, 1));
-					  $$ = inode_extend($1, $3); }
-	;
+	: msg				{ $$ = i2x_list_make($1); }
+	| msg_list msg			{
+		struct i2x_msg *m = i2x_list_get($1, $1->len - 1);
+		/* implicit: repeated start if RAW, else stop */
+		if (!m->buf || $2->buf)
+			m->flags |= F_MSG_STOP;
+		$$ = i2x_list_extend($1, $2);
+	}
+	| msg_list ',' msg		{
+		// ((struct msg *) i2x_list_get($1, $1->len - 1))->flags |= F_MSG_SR;
+		$$ = i2x_list_extend($1, $3);
+	}
+	| msg_list '.' msg		{
+		((struct i2x_msg *) i2x_list_get($1, $1->len - 1))->flags |= F_MSG_STOP;
+		$$ = i2x_list_extend($1, $3);
+	};
 
 msg
-	: WRITE data_expr		{ $$ = inode_make(T_WRITE_EXPR, $2, NULL, 1); }
-	| READ DECIMAL			{ $$ = inode_make(T_READ_EXPR, $2, NULL, 1); }
+	: WRITE data_expr		{ $$ = i2x_msg_make($2->buf, $2->len); }
+	| READ DECIMAL			{ $$ = i2x_msg_make(NULL, $2->val); }
 	;
 
 data_expr
-	: const				{ $$ = inode_make(T_DATA_EXPR, $1, NULL, 1); }
-	| data_expr const		{ $$ = inode_extend($1, $2); }
-	;
+	: const				{ $$ = $1; }
+	| data_expr const		{
+		$$ = i2x_literal_extend($1, $2);
+		/* free literal we just copied */
+		free($2->buf);
+		free($2);
+	};
 
 reg_spec
-	: reg_expr_list			{ $$ = $1; }
-	| reg_expr_list ':'		{ $$ = $1; }
+	: regrange_list			{ $$ = $1; }
+	| regrange_list ':'		{ $$ = $1; }
 	;
 
-reg_expr_list
-	: reg_expr			{ $$ = inode_make(T_REG_SPEC, $1, NULL, 1); }
-	| reg_expr_list ',' reg_expr	{ $$ = inode_extend($1, $3); }
+regrange_list
+	: regrange			{ $$ = i2x_list_make($1); }
+	| regrange_list ',' regrange	{ $$ = i2x_list_extend($1, $3); }
 	;
 
-reg_expr
-	: const				{ $$ = inode_make(T_REG, $1, $1, 1); }
-	| const '-' const		{ $$ = inode_make(T_REG, $1, $3, 1); }
-	;
+regrange
+	: const				{
+		$$ = i2x_regrange_make($1, $1);
+		free($1);
+	}
+	| const '-' const		{
+		$$ = i2x_regrange_make($1, $3);
+		free($1);
+		free($3);
+	};
 
 const
 	: PHEX				{ $$ = $1; }
 	| DECIMAL			{ $$ = $1; }
-
+	;
 
 %%
 
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-struct node* inode_make(uint16_t type, struct node *lval, struct node *rval, size_t len) {
-	struct node *node = malloc(sizeof(struct node));
-	/* TODO alloc check */
-	node->type = type;
-	node->lval.n = lval;
-	node->rval.n = rval;
-	node->len = len;
-	return node;
-}
-
-struct node* inode_extend(struct node *head, struct node *val) {
-	struct node *prev = head;
-	for (; head->rval.n; prev = prev->rval.n);
-	prev->rval = inode_make(head->type, val, NULL, 1);
-}
-
-/* extern char *yytext; */
-
 
 void iprintf(int indent, const char* fmt, ...) {
 	va_list ap;
@@ -115,79 +108,44 @@ void iprintf(int indent, const char* fmt, ...) {
 	va_end(ap);
 }
 
-void dump_ast(int indent, struct ast_node* node, int first) {
-	switch (node->type) {
-	case T_HEX:
-	case T_DEC:
-
-		struct const_hex* hex = node->lval;
-		iprintf(indent, "HEX [%d] ", node->len);
-		for (int i = 0; i < hex->len; ++i)
-			printf("%02hhx ", hex->buf[i]);
-		printf("\n");
-		// for (int rows = 0; rows < hex->len / 16 + 1; )
-		break;
-		struct const_dec* dec = node->lval;
-		iprintf(indent, "DEC %"PRIu64" (0x%016"PRIx64") bytes\n", dec->val, dec->val);
-		break;
-	case T_REG:
-		iprintf(indent, "REG\n");
-		dump_ast(indent + 2, node->lval, 1);
-		if (node->rval)
-			dump_ast(indent + 2, node->rval, 1);
-		break;
-	case T_REG_SPEC:
-		if (first)
-			iprintf(indent, "REG_SPEC [%d]\n", node->len);
-		dump_ast(indent + 2, node->lval, 1);
-		if (node->rval)
-			dump_ast(indent, node->rval, 0);
-		break;
-	case T_DATA_EXPR:
-		/* iprintf(indent, "DATA_EXPR\n"); */
-		dump_ast(indent, node->lval, 1);
-		if (node->rval)
-			dump_ast(indent, node->rval, 0);
-		break;
-	case T_WRITE_EXPR:
-		iprintf(indent, "WRITE\n");
-		dump_ast(indent + 2, node->lval, 1);
-		break;
-	case T_READ_EXPR:
-		dec = node->lval;
-		iprintf(indent, "READ %"PRIu64" (0x%016"PRIx64") bytes\n", dec->val, dec->val);
-		break;
-	case T_REP_START:
-		iprintf(indent, "REP_START\n");
-		break;
-	case T_STOP:
-		iprintf(indent, "STOP\n");
-		break;
-	case T_MSG:
-		if (first)
-			iprintf(indent, "MSG [%d]\n", node->len);
-		dump_ast(indent + 2, node->lval, 1);
-		if (node->rval)
-			dump_ast(indent, node->rval, 0);
-		break;
-	case T_CMD:
-		iprintf(indent, "CMD\n");
-		if (node->rval)
-			dump_ast(indent + 2, node->rval, 1);
-		dump_ast(indent + 2, node->lval, 1);
-		break;
-	case T_CMD_LIST:
-		if (first)
-			iprintf(indent, "CMD_LIST [%d]\n", node->len);
-		dump_ast(indent + 2, node->lval, 1);
-		if (node->rval)
-			dump_ast(indent, node->rval, 0);
-		break;
-	default:
-		fprintf(stderr, "fatal: unknown node type %d\n", node->type);
-		exit(2);
+void dump_msg_list(struct i2x_list *msg_list) {
+	iprintf(4, "i2x_list(i2x_msg)");
+	for (size_t i = 0; i < msg_list->len; ++i) {
+		struct i2x_msg *msg = msg_list->array[i];
+		iprintf(6, "i2x_msg [%s%d]",
+			msg->flags & F_MSG_RD ? "R" : "W", msg->len);
+		if (!msg->flags)
+			for (size_t j = 0; j < msg->len; ++j)
+				printf(" %02hhx", msg->buf[j]);
+		printf(" [%s]\n", msg->flags & F_MSG_STOP ? "P" : "Sr");
 	}
 }
 
+void dump_reg_spec(struct i2x_list *reg_spec)
+{
+	iprintf(4, "i2x_list(i2x_regrange)\n");
+	for (size_t i = 0; i < reg_spec->len; ++i) {
+		struct i2x_regrange *regrange = reg_spec->array[i];
+		iprintf(6, "i2x_regrange\n");
+		iprintf(8, "");
+		for (size_t j = 0; j < regrange->len; ++j)
+			printf("%02hhx", regrange->lower[j]);
+		puts("");
+		iprintf(8, "");
+		for (size_t j = 0; j < regrange->len; ++j)
+			printf("%02hhx", regrange->upper[j]);
+		puts("");
+	}
+}
 
-
+void dump_cmd_list(struct i2x_list *cmd_list)
+{
+	iprintf(0, "i2x_list(i2x_cmd)\n");
+	for (size_t i = 0; i < cmd_list->len; ++i) {
+		struct i2x_cmd *cmd = cmd_list->array[i];
+		iprintf(2, "i2x_cmd\n");
+		if (cmd->reg_spec)
+			dump_reg_spec(cmd->reg_spec);
+		dump_msg_list(cmd->msg_list);
+	}
+}

@@ -1,76 +1,47 @@
 #include <stddef.h>
 #include <stdint.h>
 
-struct const_dec {
-	/*              WWWE */
-	uint8_t		flags;
-#define F_DEC_BIG_ENDIAN	(1 << 31)
-#define F_DEC_WIDTH_MASK	(~F_DEC_BIG_ENDIAN)
-	uint64_t 	val;
-};
+#define	LIST_INIT_CAP	2
 
-struct const_hex {
-	size_t		len;
-	char		*buf;
-};
-
-struct ast_node {
-	int	type;
-#define T_EMPTY		(1 << 0)
-#define T_HEX		(1 << 1)
-#define T_DEC		(1 << 2)
-#define T_REG		(1 << 3)
-#define T_REG_SPEC	(1 << 5)
-#define T_DATA_EXPR	(1 << 6)
-#define	T_WRITE_EXPR	(1 << 7)
-#define T_READ_EXPR	(1 << 8)
-#define T_REP_START	(1 << 9)
-#define T_STOP		(1 << 10)
-#define T_MSG		(1 << 11)
-#define T_CMD		(1 << 12)
-#define T_CMD_LIST	(1 << 13)
-	void	*lval;
-	void	*rval;
+struct i2x_list {
+	void	**array;
 	size_t	len;
+	size_t	cap;
 };
 
-/*                   */
-
-struct prog {
-	size_t			len;
-	struct cmd		*cmds;
+struct i2x_literal {
+	uint8_t		*buf;
+	size_t		len;
+	uint64_t	val;
 };
 
-struct cmd {
-	struct reg_spec		*reg_spec;
-	size_t			len;
-	struct msg_segment	*segments;
+struct i2x_regrange {
+	uint8_t		*lower;
+	uint8_t		*upper;
+	size_t		len;
 };
 
-struct reg_spec {
-	int			big_endian;
-	// what's the max width??
-	int			width;
-	size_t			len;
-	struct reg_range	*ranges;
+struct i2x_msg {
+	uint8_t		*buf;
+	size_t		len;
+	uint16_t	flags;
+#define F_MSG_RD	(1 << 0)
+#define F_MSG_STOP	(1 << 8)
 };
 
-struct reg_range {
-	uint8_t			*start;
-	uint8_t			*stop;
+struct i2x_cmd {
+	struct i2x_list	*msg_list;
+	struct i2x_list	*reg_spec;
 };
 
-struct msg_segment {
-	size_t			len;
-	struct msg		*msgs;
-};
+struct i2x_cmd *i2x_cmd_make(struct i2x_list *msg_list,
+				struct i2x_list *reg_spec);
+struct i2x_msg *i2x_msg_make(uint8_t *buf, size_t len);
+struct i2x_regrange *i2x_regrange_make(struct i2x_literal *lower,
+					struct i2x_literal *upper);
+struct i2x_literal *i2x_literal_extend(struct i2x_literal *dst,
+					struct i2x_literal *src);
 
-struct msg {
-	uint16_t		flags;
-	size_t			len;
-	uint8_t			*buf;
-};
-
-uint8_t *encode_dec(struct const_dec *dec);
-struct prog *xlate_prog(struct ast_node* ast_prog);
-void exec_prog(struct prog *prog);
+struct i2x_list *i2x_list_make(void *element);
+struct i2x_list *i2x_list_extend(struct i2x_list *list, void *element);
+void *i2x_list_get(struct i2x_list *list, size_t index);

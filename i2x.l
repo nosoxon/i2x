@@ -48,33 +48,33 @@ static int read_encountered = 0;
 }
 
 %%
-#include "ast.h"
 
+#include <assert.h>
+#include <stdarg.h>
+
+uint8_t *encode_dec(uint64_t val, int width, int big_endian);
 
 int parse_plain_hex() {
 	if (read_encountered || yyleng % 2) {
 		if (!read_encountered && yyleng > 2)
 			fprintf(stderr, "warning: literal `%s' will not be parsed as hex", yytext);
 		read_encountered = 0;
-		/* fprintf(stderr, "len must be mult 2 %s[%d]\n", yytext, yyleng); */
 		return 0;
-		//exit(2);
 	}
 
 	size_t len = yyleng / 2;
-	char *buf = malloc(len);
-	// if (err) ...
+	uint8_t *buf = malloc(len);
+	assert(buf);
 
 	for (size_t i = 0; i < len; ++i)
 		sscanf(yytext + 2*i, "%2hhx", buf + i);
 
-	struct node *n = malloc(sizeof(struct node));
-	n->type = T_HEX;
-	n->lval.x = buf;
-	n->rval.n = NULL;
-	n->len = len;
+	struct i2x_literal *literal = malloc(sizeof(struct i2x_literal));
+	literal->buf = buf;
+	literal->len = len;
+	literal->val = 0;
 
-	yylval.node = n;
+	yylval.literal = literal;
 	return 1;
 }
 
@@ -87,27 +87,34 @@ void parse_decimal() {
 	if ((yytext[1] | 32) == 'i') {/* w[dD] (case is bit 5)*/
 		width = yytext[0] - '0';
 		pos = 2;
-	} else if ((yytext[0] | 32) == 'i')
+	} else if ((yytext[0] | 32) == 'i') {
 		pos = 1;
+	}
 
 	if (pos > 0)
 		big_endian = !(yytext[pos - 1] & 32);
 
+	/* TODO check for error */
 	uint64_t val = strtoull(yytext + pos, NULL, 10);
 
-	struct node *n = malloc(sizeof(struct node));
-	n->type = T_DEC;
-	n->lval.x = encode_dec(val, width, big_endian);
-	n->rval.flags.big_endian = big_endian;
-	n->rval.flags.val = val;
-	n->len = width;
+	struct i2x_literal *literal = malloc(sizeof(struct i2x_literal));
+	literal->buf = encode_dec(val, width, big_endian);
+	literal->len = width;
+	literal->val = val;
 
-	yylval.node = n;
+	yylval.literal = literal;
+}
+
+void die(int code, const char *fmt, ...) {
+	va_list ap;
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	puts("");
+	va_end(ap);
+	exit(code);
 }
 
 uint8_t *encode_dec(uint64_t val, int width, int big_endian) {
-	/* int big_endian = !!(dec->flags & F_DEC_BIG_ENDIAN);
-	int width = dec->flags & F_DEC_WIDTH_MASK; */
 	if (width < 1)
 		die(1, "width must be at least 1");
 	if (width > 8)
