@@ -3,11 +3,20 @@
 #include <string.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "i2x.h"
 
+/* add 1 with carry and wrap around (unsigned) */
+void incn(uint8_t *n, int width, int big_endian)
+{
+	for (size_t b = 0; b < width; ++b)
+		if (++n[big_endian ? width-1 - b : b]) break;
+}
+
 struct i2x_list *i2x_cmd_segment(struct i2x_list *msg_list,
-				struct i2x_list *reg_spec) {
+				struct i2x_list *reg_spec)
+{
 	struct i2x_list *segment_list = i2x_list_make();
 
 	size_t width = 0;
@@ -33,8 +42,8 @@ struct i2x_list *i2x_cmd_segment(struct i2x_list *msg_list,
 	size_t lseg = 0;
 	for (size_t i = 0, j = 0; i < msg_list->len; ++i, ++j) {
 		struct i2x_msg *msg = i2x_list_get(msg_list, i);
+		/* insert write for register pointer if read (2 msg total) */
 		if (reg_spec && msg->flags & F_MSG_RD) {
-			/* insert write for register pointer */
 			k_msgs[j].addr = 0;
 			k_msgs[j].flags = F_MSG_REG;
 			k_msgs[j].len = width;
@@ -48,6 +57,7 @@ struct i2x_list *i2x_cmd_segment(struct i2x_list *msg_list,
 		k_msgs[j].len = msg->len;
 		k_msgs[j].buf = msg->buf;
 
+		/* prepend to msg buffer if write (1 msg total) */
 		if (reg_spec && !(msg->flags & F_MSG_RD)) {
 			uint8_t *buf = malloc(width + msg->len);
 			assert(buf);
@@ -79,7 +89,7 @@ struct i2x_cmd *i2x_cmd_make(struct i2x_list *msg_list,
 	struct i2x_cmd *cmd = malloc(sizeof(struct i2x_cmd));
 	assert(cmd);
 
-	// last message in msg_list necessarily has a stop
+	/* last message in msg_list necessarily has a stop */
 	((struct i2x_msg *) i2x_list_get(msg_list, msg_list->len - 1))
 		->flags |= F_MSG_STOP;
 
@@ -118,17 +128,32 @@ struct i2x_msg *i2x_msg_make(uint8_t *buf, size_t len)
 	return msg;
 }
 
-struct i2x_regrange *i2x_regrange_make(struct i2x_literal *lower,
-					struct i2x_literal *upper)
+/* consume two literals and produce a register range */
+struct i2x_regrange *i2x_regrange_make(struct i2x_literal *start,
+					struct i2x_literal *stop)
 {
-	assert(lower && upper);
-	assert(lower->len == upper->len);
+	assert(start && stop);
+	assert(start->len == stop->len);
 	struct i2x_regrange *regrange = malloc(sizeof(struct i2x_regrange));
 	assert(regrange);
 
-	regrange->lower = lower->buf;
-	regrange->upper = upper->buf;
-	regrange->width = lower->len;
+	regrange->start = start->buf;
+	regrange->stop = stop->buf;
+	regrange->width = start->len;
+	/* default BE for hex, LE for dec: determined by first addr in regrange */
+	regrange->big_endian = start->type & 1;
+
+	if (regrange->start == regrange->stop) {
+		regrange->stop = malloc(regrange->width);
+		assert(regrange->stop);
+		memcpy(regrange->stop, regrange->start, regrange->width);
+	}
+	/* to make looping easier */
+	incn(regrange->stop, regrange->width, regrange->big_endian);
+
+	free(start);
+	if (start - stop)
+		free(stop);
 	return regrange;
 }
 
@@ -187,4 +212,73 @@ void i2x_list_free(struct i2x_list *list)
 	for (size_t i = 0; i < list->len; ++i)
 		free(i2x_list_get(list, i));
 	free(list);
+}
+
+/******************************************************************************/
+
+void i2x_exec_segment(struct i2x_segment *segment, uint8_t *reg,
+				size_t reg_width)
+{
+	for (size_t i = 0; i < segment->msgset.nmsgs; ++i) {
+		struct i2c_msg *msg = segment->msgset.msgs + i;
+		printf("{addr=XXXX  flags=%04x  len=%4d  buf=[",
+			msg->flags & ~F_MSG_REG, msg->len);
+
+		if (msg->flags & I2C_M_RD) {
+			for (size_t j = 0; j < msg->len; ++j)
+				printf(" ..");
+		} else {
+			for (size_t j = 0; j < msg->len; ++j) {
+				if (j < reg_width && msg->flags & F_MSG_REG)
+					printf(" %02hhx", reg[j]);
+				else
+					printf(" %02hhx", msg->buf[j]);
+			}
+		}
+		puts(" ]}");
+	}
+	puts("---"); /* stop */
+}
+
+
+void i2x_exec_segment_list(struct i2x_list *segment_list, uint8_t *reg,
+				size_t reg_width)
+{
+	for (size_t i = 0; i < segment_list->len; ++i) {
+		struct i2x_segment *segment = i2x_list_get(segment_list, i);
+		i2x_exec_segment(segment, reg, reg_width);
+	}
+}
+
+void i2x_exec_cmd(struct i2x_cmd *cmd)
+{
+	struct i2x_list *reg_spec = cmd->reg_spec;
+	struct i2x_list *segment_list = cmd->segment_list;
+
+	if (!reg_spec) {
+		i2x_exec_segment_list(segment_list, NULL, 0);
+		return;
+	}
+
+	assert(reg_spec->len);
+	size_t width = ((struct i2x_regrange *) i2x_list_get(reg_spec, 0))
+		->width; /* TODO need to make sure these are all the same within a regspec*/
+
+	uint8_t *reg = malloc(width);
+	assert(reg);
+	for (size_t i = 0; i < reg_spec->len; ++i) {
+		struct i2x_regrange *range = i2x_list_get(reg_spec, i);
+		memcpy(reg, range->start, width);
+		do {
+			i2x_exec_segment_list(segment_list, reg, width);
+			incn(reg, width, range->big_endian);
+		} while(memcmp(reg, range->stop, width));
+	}
+	free(reg);
+}
+
+void i2x_exec_cmd_list(struct i2x_list *cmd_list)
+{
+	for (size_t i = 0; i < cmd_list->len; ++i)
+		i2x_exec_cmd(i2x_list_get(cmd_list, i));
 }

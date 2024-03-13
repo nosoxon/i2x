@@ -16,7 +16,7 @@ void parse_decimal();
 static int read_encountered = 0;
 %}
 
-%option noyywrap
+%option noyywrap nounput noinput
 /*%option noyywrap nounput noinput nodefault*/
 /*%option noyyalloc noyyrealloc noyyfree*/
 
@@ -76,7 +76,8 @@ int parse_plain_hex() {
 	struct i2x_literal *literal = malloc(sizeof(struct i2x_literal));
 	literal->buf = buf;
 	literal->len = len;
-	literal->val = 0;
+	literal->val = -1;
+	literal->type = I2X_LIT_HEX_BE;
 
 	yylval.literal = literal;
 	return 1;
@@ -105,6 +106,7 @@ void parse_decimal() {
 	literal->buf = encode_dec(val, width, big_endian);
 	literal->len = width;
 	literal->val = val;
+	literal->type = big_endian ? I2X_LIT_DEC_BE : I2X_LIT_DEC_LE;
 
 	yylval.literal = literal;
 }
@@ -133,3 +135,7 @@ uint8_t *encode_dec(uint64_t val, int width, int big_endian) {
 	return buf;
 }
 
+
+void yyerror(char *s) {
+	fprintf(stderr, "error: %s\n", s);
+}

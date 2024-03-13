@@ -24,7 +24,13 @@ void dump_cmd_list(struct i2x_list *cmd_list);
 
 %%
 
-prog: cmd_list	{ dump_cmd_list($1); };
+prog: cmd_list	{
+	printf("\nDEBUG DUMP\n");
+	dump_cmd_list($1);
+
+	printf("\nBEGIN EXECUTE\n");
+	i2x_exec_cmd_list($1);
+};
 
 cmd_list
 	: cmd				{
@@ -52,7 +58,7 @@ msg_list
 	| msg_list msg			{
 		struct i2x_msg *m = i2x_list_get($1, $1->len - 1);
 		/* implicit: repeated start if RAW, else stop */
-		if (!m->buf || $2->buf)
+		if (m->flags & F_MSG_RD || !($2->flags & F_MSG_RD))
 			m->flags |= F_MSG_STOP;
 		$$ = i2x_list_extend($1, $2);
 	}
@@ -93,15 +99,8 @@ regrange_list
 	;
 
 regrange
-	: const				{
-		$$ = i2x_regrange_make($1, $1);
-		free($1);
-	}
-	| const '-' const		{
-		$$ = i2x_regrange_make($1, $3);
-		free($1);
-		free($3);
-	};
+	: const				{ $$ = i2x_regrange_make($1, $1); }
+	| const '-' const		{ $$ = i2x_regrange_make($1, $3); };
 
 const
 	: PHEX				{ $$ = $1; }
@@ -159,10 +158,10 @@ void dump_reg_spec(struct i2x_list *reg_spec)
 		struct i2x_regrange *regrange = i2x_list_get(reg_spec, i);
 		iprintf(6, "i2x_regrange [");
 		for (size_t j = 0; j < regrange->width; ++j)
-			printf("%02hhx", regrange->lower[j]);
+			printf("%02hhx", regrange->start[j]);
 		printf("-");
 		for (size_t j = 0; j < regrange->width; ++j)
-			printf("%02hhx", regrange->upper[j]);
+			printf("%02hhx", regrange->stop[j]);
 		puts("]");
 	}
 }
@@ -180,8 +179,4 @@ void dump_cmd_list(struct i2x_list *cmd_list)
 				->width : 0;
 		dump_segment_list(cmd->segment_list, width);
 	}
-}
-
-void yyerror(char *s) {
-	fprintf(stderr, "error: %s\n", s);
 }

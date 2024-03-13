@@ -15,12 +15,18 @@ struct i2x_literal {
 	uint8_t		*buf;
 	size_t		len;
 	uint64_t	val;
+	int		type;
+#define	I2X_LIT_DEC_LE	0b00
+#define	I2X_LIT_DEC_BE	0b01
+#define	I2X_LIT_HEX_LE	0b10
+#define	I2X_LIT_HEX_BE	0b11
 };
 
 struct i2x_regrange {
-	uint8_t		*lower;
-	uint8_t		*upper;
+	uint8_t		*start;
+	uint8_t		*stop;
 	size_t		width;
+	int		big_endian;
 };
 
 struct i2x_msg {
@@ -57,3 +63,7 @@ struct i2x_list *i2x_list_make();
 struct i2x_list *i2x_list_extend(struct i2x_list *list, void *element);
 void *i2x_list_get(struct i2x_list *list, size_t index);
 void i2x_list_free(struct i2x_list *list);
+
+void i2x_exec_cmd_list(struct i2x_list *cmd_list);
+
+void yyerror(char *s);
