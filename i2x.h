@@ -1,3 +1,6 @@
+#pragma once
+
+#include <assert.h>
 #include <linux/i2c.h>
 #include <linux/i2c-dev.h>
 #include <stddef.h>
@@ -35,7 +38,8 @@ struct i2x_msg {
 	uint16_t	flags;
 #define F_MSG_RD	(1 << 0)
 #define F_MSG_STOP	(1 << 8)
-#define F_MSG_REG	(1 << 9)
+#define F_MSG_SR	(1 << 9)
+#define F_MSG_REG	(1 << 10)
 };
 
 struct i2x_segment {
@@ -51,18 +55,26 @@ struct i2x_cmd {
 };
 
 struct i2x_cmd *i2x_cmd_make(struct i2x_list *msg_list,
-				struct i2x_list *reg_spec);
+			     struct i2x_list *reg_spec);
 struct i2x_segment *i2x_segment_make(struct i2c_msg *msgs, int nmsgs);
 struct i2x_msg *i2x_msg_make(uint8_t *buf, size_t len);
 struct i2x_regrange *i2x_regrange_make(struct i2x_literal *lower,
-					struct i2x_literal *upper);
+				       struct i2x_literal *upper);
 struct i2x_literal *i2x_literal_extend(struct i2x_literal *dst,
-					struct i2x_literal *src);
+				       struct i2x_literal *src);
 
 struct i2x_list *i2x_list_make();
 struct i2x_list *i2x_list_extend(struct i2x_list *list, void *element);
-void *i2x_list_get(struct i2x_list *list, size_t index);
 void i2x_list_free(struct i2x_list *list);
+
+#define i2x_list_get(type, list, index) ({		\
+	assert((list) && (index) < (list)->len);	\
+	(struct type *) (list)->array[index]; })
+
+#define i2x_list_foreach(type, it, list)				\
+	for (struct type **_it = (struct type **) (list)->array,	\
+	*it = *_it; _it < (struct type **) (list)->array + (list)->len;	\
+	it = *++_it)
 
 void i2x_exec_cmd_list(struct i2x_list *cmd_list);
 
