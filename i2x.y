@@ -58,7 +58,6 @@ msg_list
 		$$ = i2x_list_extend(list, $1);
 	}
 	| msg_list msg			{
-		/* if there is a regrange then every message is stop unless explicit comma*/
 		struct i2x_msg *m = i2x_list_get(i2x_msg, $1, $1->len - 1);
 		/* implicit: repeated start if RAW, else stop */
 		if (m->flags & F_MSG_RD || !($2->flags & F_MSG_RD))

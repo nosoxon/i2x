@@ -26,35 +26,45 @@ struct i2x_list *i2x_cmd_segment(struct i2x_list *msg_list,
 	}
 
 	size_t nrd = 0, nseg = 0;
-	i2x_list_foreach(i2x_msg, msg, msg_list) {
-		if (msg->flags & F_MSG_RD)
+	i2x_list_foreach (i2x_msg, msg, msg_list) {
+		if (msg->flags & F_MSG_RD) {
 			++nrd;
+			/*
+			 * If a register address write is prepended, then
+			 * add a stop to the previous message, unless it is
+			 * explicitly marked as a repeated start.
+			 */
+			if (reg_spec && msg_prev &&
+					!(msg_prev->flags & F_MSG_SR)) {
+				msg_prev->flags |= F_MSG_STOP;
+				++nseg;
+			}
+		}
 		if (msg->flags & F_MSG_STOP)
 			++nseg;
 	}
 
 	/* an additional i2c_msg (W) for each read if it is prefixed by register*/
 	size_t n = msg_list->len + nrd;
-	struct i2c_msg *k_msgs = calloc(n, sizeof(struct i2c_msg));
-	assert(k_msgs);
+	struct i2c_msg *kmsgs = calloc(n, sizeof(struct i2c_msg));
+	assert(kmsgs);
 
-	size_t lseg = 0;
-	for (size_t i = 0, j = 0; i < msg_list->len; ++i, ++j) {
-		struct i2x_msg *msg = i2x_list_get(i2x_msg, msg_list, i);
+	size_t next_segment = 0, k = 0;
+	i2x_list_foreach (i2x_msg, msg, msg_list) {
 		/* insert write for register pointer if read (2 msg total) */
 		if (reg_spec && msg->flags & F_MSG_RD) {
-			k_msgs[j].addr = 0;
-			k_msgs[j].flags = F_MSG_REG;
-			k_msgs[j].len = width;
-			k_msgs[j].buf = malloc(width);
-			assert(k_msgs[j].buf);
-			++j;
+			kmsgs[k].addr = 0;
+			kmsgs[k].flags = F_MSG_REG;
+			kmsgs[k].len = width;
+			kmsgs[k].buf = malloc(width);
+			assert(kmsgs[k].buf);
+			++k;
 		}
 
-		k_msgs[j].addr = 0;
-		k_msgs[j].flags = msg->flags & F_MSG_RD ? I2C_M_RD : 0;
-		k_msgs[j].len = msg->len;
-		k_msgs[j].buf = msg->buf;
+		kmsgs[k].addr = 0;
+		kmsgs[k].flags = msg->flags & F_MSG_RD ? I2C_M_RD : 0;
+		kmsgs[k].len = msg->len;
+		kmsgs[k].buf = msg->buf;
 
 		/* prepend to msg buffer if write (1 msg total) */
 		if (reg_spec && !(msg->flags & F_MSG_RD)) {
@@ -62,18 +72,20 @@ struct i2x_list *i2x_cmd_segment(struct i2x_list *msg_list,
 			assert(buf);
 
 			memcpy(buf + width, msg->buf, msg->len);
-			k_msgs[j].flags |= F_MSG_REG;
-			k_msgs[j].len += width;
-			k_msgs[j].buf = buf;
+			kmsgs[k].flags |= F_MSG_REG;
+			kmsgs[k].len += width;
+			kmsgs[k].buf = buf;
 			free(msg->buf);
 		}
 
 		if (msg->flags & F_MSG_STOP) {
 			struct i2x_segment *segment =
-				i2x_segment_make(k_msgs + lseg, j + 1 - lseg);
+				i2x_segment_make(kmsgs + next_segment,
+						 k + 1 - next_segment);
 			i2x_list_extend(segment_list, segment);
-			lseg = j + 1;
+			next_segment = k + 1;
 		}
+		++k;
 		// fill in spots for reg
 		// msg metadata (delays, read format, ...) how???
 	}
@@ -231,7 +243,7 @@ void i2x_exec_segment(struct i2x_segment *segment, uint8_t *reg,
 void i2x_exec_segment_list(struct i2x_list *segment_list, uint8_t *reg,
 				size_t reg_width)
 {
-	i2x_list_foreach(i2x_segment, segment, segment_list)
+	i2x_list_foreach (i2x_segment, segment, segment_list)
 		i2x_exec_segment(segment, reg, reg_width);
 }
 
@@ -251,7 +263,7 @@ void i2x_exec_cmd(struct i2x_cmd *cmd)
 
 	uint8_t *reg = malloc(width);
 	assert(reg);
-	i2x_list_foreach(i2x_regrange, range, reg_spec) {
+	i2x_list_foreach (i2x_regrange, range, reg_spec) {
 		memcpy(reg, range->start, width);
 		do {
 			i2x_exec_segment_list(segment_list, reg, width);
@@ -263,6 +275,6 @@ void i2x_exec_cmd(struct i2x_cmd *cmd)
 
 void i2x_exec_cmd_list(struct i2x_list *cmd_list)
 {
-	i2x_list_foreach(i2x_cmd, cmd, cmd_list)
+	i2x_list_foreach (i2x_cmd, cmd, cmd_list)
 		i2x_exec_cmd(cmd);
 }

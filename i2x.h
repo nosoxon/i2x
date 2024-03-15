@@ -73,7 +73,8 @@ void i2x_list_free(struct i2x_list *list);
 
 #define i2x_list_foreach(type, it, list)				\
 	for (struct type **_it = (struct type **) (list)->array,	\
-	*it = *_it; _it < (struct type **) (list)->array + (list)->len;	\
+	*it = *_it, __attribute__((unused)) *it##_prev = NULL; _it <	\
+	(struct type **) (list)->array + (list)->len; it##_prev = *_it,	\
 	it = *++_it)
 
 void i2x_exec_cmd_list(struct i2x_list *cmd_list);

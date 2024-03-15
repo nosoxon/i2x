@@ -37,14 +37,14 @@ void dump_segment(struct i2x_segment *segment, int reg_width)
 void dump_segment_list(struct i2x_list *segment_list, int reg_width)
 {
 	iprintf(4, "i2x_list(i2x_segment)\n");
-	i2x_list_foreach(i2x_segment, segment, segment_list)
+	i2x_list_foreach (i2x_segment, segment, segment_list)
 		dump_segment(segment, reg_width);
 }
 
 void dump_reg_spec(struct i2x_list *reg_spec)
 {
 	iprintf(4, "i2x_list(i2x_regrange)\n");
-	i2x_list_foreach(i2x_regrange, regrange, reg_spec) {
+	i2x_list_foreach (i2x_regrange, regrange, reg_spec) {
 		iprintf(6, "i2x_regrange [");
 		for (size_t j = 0; j < regrange->width; ++j)
 			printf("%02hhx", regrange->start[j]);
@@ -58,7 +58,7 @@ void dump_reg_spec(struct i2x_list *reg_spec)
 void dump_cmd_list(struct i2x_list *cmd_list)
 {
 	iprintf(0, "i2x_list(i2x_cmd)\n");
-	i2x_list_foreach(i2x_cmd, cmd, cmd_list) {
+	i2x_list_foreach (i2x_cmd, cmd, cmd_list) {
 		iprintf(2, "i2x_cmd\n");
 		if (cmd->reg_spec)
 			dump_reg_spec(cmd->reg_spec);
