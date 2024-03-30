@@ -1,9 +1,12 @@
 #include <assert.h>
+#include <err.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 #include "i2x.h"
 
@@ -14,18 +17,25 @@ void incn(uint8_t *n, int width, int big_endian)
 		if (++n[big_endian ? width-1 - b : b]) break;
 }
 
+/**
+ * i2x_cmd_segment() - Translate message list into segments for the kernel.
+ * @msg_list: list of i2x_msgs to be segmented
+ * @reg_spec: register spec of the messages in the list
+ *
+ * 
+ */
 struct i2x_list *i2x_cmd_segment(struct i2x_list *msg_list,
 				 struct i2x_list *reg_spec)
 {
 	struct i2x_list *segment_list = i2x_list_make();
 
-	size_t width = 0;
+	size_t reg_width = 0;
 	if (reg_spec) {
-		width = i2x_list_get(i2x_regrange, reg_spec, 0)->width;
-		assert(width);
+		reg_width = i2x_list_get(i2x_regrange, reg_spec, 0)->width;
+		assert(reg_width);
 	}
 
-	size_t nrd = 0, nseg = 0;
+	size_t nrd = 0, nseg = 0, npause = 0;
 	i2x_list_foreach (i2x_msg, msg, msg_list) {
 		if (msg->flags & F_MSG_RD) {
 			++nrd;
@@ -42,22 +52,31 @@ struct i2x_list *i2x_cmd_segment(struct i2x_list *msg_list,
 		}
 		if (msg->flags & F_MSG_STOP)
 			++nseg;
+		if (msg->flags & F_MSG_PAUSE)
+			++nseg, ++npause;
 	}
 
-	/* an additional i2c_msg (W) for each read if it is prefixed by register*/
-	size_t n = msg_list->len + nrd;
+	/* an additional Wr for each Rd if it is prefixed by register */
+	size_t n = msg_list->len + nrd - npause;
 	struct i2c_msg *kmsgs = calloc(n, sizeof(struct i2c_msg));
-	assert(kmsgs);
+	uint16_t *msgflags = calloc(n, sizeof(uint16_t));
+	assert(kmsgs && msgflags);
 
 	size_t next_segment = 0, k = 0;
 	i2x_list_foreach (i2x_msg, msg, msg_list) {
+		if (msg->flags & F_MSG_PAUSE) {
+			i2x_list_get(i2x_segment, segment_list,
+			             segment_list->len - 1)->delay = msg->len;
+			continue;
+		}
+
 		/* insert write for register pointer if read (2 msg total) */
 		if (reg_spec && msg->flags & F_MSG_RD) {
 			kmsgs[k].addr = 0;
-			kmsgs[k].flags = F_MSG_REG;
-			kmsgs[k].len = width;
-			kmsgs[k].buf = malloc(width);
+			kmsgs[k].len = reg_width;
+			kmsgs[k].buf = malloc(reg_width);
 			assert(kmsgs[k].buf);
+			msgflags[k] = F_MSG_REG;
 			++k;
 		}
 
@@ -65,22 +84,24 @@ struct i2x_list *i2x_cmd_segment(struct i2x_list *msg_list,
 		kmsgs[k].flags = msg->flags & F_MSG_RD ? I2C_M_RD : 0;
 		kmsgs[k].len = msg->len;
 		kmsgs[k].buf = msg->buf;
+		msgflags[k] = msg->flags;
 
 		/* prepend to msg buffer if write (1 msg total) */
 		if (reg_spec && !(msg->flags & F_MSG_RD)) {
-			uint8_t *buf = malloc(width + msg->len);
+			uint8_t *buf = malloc(reg_width + msg->len);
 			assert(buf);
 
-			memcpy(buf + width, msg->buf, msg->len);
-			kmsgs[k].flags |= F_MSG_REG;
-			kmsgs[k].len += width;
+			memcpy(buf + reg_width, msg->buf, msg->len);
+			kmsgs[k].len += reg_width;
 			kmsgs[k].buf = buf;
 			free(msg->buf);
+			msgflags[k] |= F_MSG_REG;
 		}
 
 		if (msg->flags & F_MSG_STOP) {
 			struct i2x_segment *segment =
 				i2x_segment_make(kmsgs + next_segment,
+						 msgflags + next_segment,
 						 k + 1 - next_segment);
 			i2x_list_extend(segment_list, segment);
 			next_segment = k + 1;
@@ -109,31 +130,33 @@ struct i2x_cmd *i2x_cmd_make(struct i2x_list *msg_list,
 	return cmd;
 }
 
-struct i2x_segment *i2x_segment_make(struct i2c_msg *msgs, int nmsgs)
+struct i2x_segment *i2x_segment_make(struct i2c_msg *msgs, uint16_t *msgflags,
+				     int nmsgs)
 {
 	struct i2x_segment *segment = malloc(sizeof(struct i2x_segment));
 	assert(segment);
 
 	segment->msgset.msgs = msgs;
 	segment->msgset.nmsgs = nmsgs;
+	segment->msgflags = msgflags;
 
 	return segment;
 }
 
-struct i2x_msg *i2x_msg_make(uint8_t *buf, size_t len)
+struct i2x_msg *i2x_msg_make(uint8_t *buf, size_t len, uint16_t flags)
 {
-	assert(len);
+	assert(flags & F_MSG_PAUSE || len);
 	struct i2x_msg *msg = malloc(sizeof(struct i2x_msg));
 	assert(msg);
 
 	msg->buf = buf;
 	msg->len = len;
-	msg->flags = 0;
+	msg->flags = flags;
 
-	if (!buf) { /* read operation */
+	if (flags & F_MSG_RD) {
+		/* allocate buffer now for reads */
 		msg->buf = malloc(len);
 		assert(msg->buf);
-		msg->flags |= F_MSG_RD;
 	}
 	return msg;
 }
@@ -216,35 +239,82 @@ void i2x_list_free(struct i2x_list *list)
 
 /******************************************************************************/
 
-void i2x_exec_segment(struct i2x_segment *segment, uint8_t *reg,
-				size_t reg_width)
+#define DEBUG(args...)	printf(args)
+
+/* https://elixir.bootlin.com/linux/latest/source/drivers/i2c/i2c-dev.c#L235 */
+int dummy_ioctl(int _fd, unsigned long _req,
+		struct i2c_rdwr_ioctl_data *msgset)
+{
+	static const char random_data[] = {
+		0x08, 0x07, 0x3d, 0xb7, 0x72, 0xf7, 0x11, 0x3c,
+		0x1b, 0x46, 0xcc, 0xcd, 0x8c, 0xbe, 0xae, 0x0c,
+		0x91, 0x7b, 0x9d, 0x6f, 0x74, 0xcf, 0x58, 0x40,
+		0x55, 0xfb, 0x0f, 0x04, 0x17, 0x7c, 0xd1, 0xac
+	};
+
+	for (size_t i = 0; i < msgset->nmsgs; ++i) {
+		if (msgset->msgs[i].flags & I2C_M_RD) {
+			for (size_t j = 0; j < msgset->msgs[i].len; ++j)
+				msgset->msgs[i].buf[j] = random_data[j % 32];
+		}
+
+		DEBUG("  ioctl(%s) [%2d] :",
+		      msgset->msgs[i].flags & I2C_M_RD ? "R" : "W",
+		      msgset->msgs[i].len);
+		for (size_t j = 0; j < msgset->msgs[i].len; ++j) {
+			DEBUG(" %02hhx", msgset->msgs[i].buf[j]);
+		}
+		DEBUG("\n");
+	}
+
+	return 0;
+}
+
+void print_shexp(uint8_t *buf, size_t len) {
+	for (size_t i = 0; i < len; ++i)
+		printf("%02x%s", buf[i], i < len - 1 ? " " : "");
+}
+
+void i2x_exec_segment(struct i2x_segment *segment, uint16_t addr,
+		      uint8_t *reg, size_t reg_width)
 {
 	for (size_t i = 0; i < segment->msgset.nmsgs; ++i) {
 		struct i2c_msg *msg = segment->msgset.msgs + i;
-		printf("{addr=XXXX  flags=%04x  len=%4d  buf=[",
-			msg->flags & ~F_MSG_REG, msg->len);
 
-		if (msg->flags & I2C_M_RD) {
-			for (size_t j = 0; j < msg->len; ++j)
-				printf(" ..");
-		} else {
-			for (size_t j = 0; j < msg->len; ++j) {
-				if (j < reg_width && msg->flags & F_MSG_REG)
-					printf(" %02hhx", reg[j]);
-				else
-					printf(" %02hhx", msg->buf[j]);
-			}
-		}
-		puts(" ]}");
+		msg->addr = addr;
+		if (segment->msgflags[i] & F_MSG_RD)
+			explicit_bzero(msg->buf, msg->len);
+		if (segment->msgflags[i] & F_MSG_REG)
+			memcpy(msg->buf, reg, reg_width);
 	}
-	puts("---"); /* stop */
+
+	if (dummy_ioctl(0, I2C_RDWR, &segment->msgset))
+		errx(1, "oh no! ioctl failed!");
+
+	for (size_t i = 0; i < segment->msgset.nmsgs; ++i) {
+		struct i2c_msg *msg = segment->msgset.msgs + i;
+		if (!(segment->msgflags[i] & F_MSG_RD))
+			continue;
+
+		if (i > 0 && segment->msgflags[i - 1] & F_MSG_REG) {
+			print_shexp(segment->msgset.msgs[i - 1].buf,
+				    segment->msgset.msgs[i - 1].len);
+			printf(": ");
+		}
+
+		print_shexp(msg->buf, msg->len);
+		putchar('\n');
+	}
+
+	if (segment->delay)
+		usleep(1000 * segment->delay);
 }
 
 void i2x_exec_segment_list(struct i2x_list *segment_list, uint8_t *reg,
 				size_t reg_width)
 {
 	i2x_list_foreach (i2x_segment, segment, segment_list)
-		i2x_exec_segment(segment, reg, reg_width);
+		i2x_exec_segment(segment, 0, reg, reg_width);
 }
 
 void i2x_exec_cmd(struct i2x_cmd *cmd)
@@ -259,7 +329,6 @@ void i2x_exec_cmd(struct i2x_cmd *cmd)
 
 	assert(reg_spec->len);
 	size_t width = i2x_list_get(i2x_regrange, reg_spec, 0)->width;
-	/* TODO need to make sure these are all the same within a regspec*/
 
 	uint8_t *reg = malloc(width);
 	assert(reg);
@@ -273,8 +342,8 @@ void i2x_exec_cmd(struct i2x_cmd *cmd)
 	free(reg);
 }
 
-void i2x_exec_cmd_list(struct i2x_list *cmd_list)
+void i2x_exec_prog(struct i2x_prog *prog)
 {
-	i2x_list_foreach (i2x_cmd, cmd, cmd_list)
+	i2x_list_foreach (i2x_cmd, cmd, prog->cmd_list)
 		i2x_exec_cmd(cmd);
 }
