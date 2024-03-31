@@ -27,10 +27,10 @@ struct i2x_literal {
 	size_t				len;
 	uint64_t			val;
 	int				type;
-#define	I2X_LIT_DEC_LE	0b00
-#define	I2X_LIT_DEC_BE	0b01
-#define	I2X_LIT_HEX_LE	0b10
-#define	I2X_LIT_HEX_BE	0b11
+#define		I2X_LIT_DEC_LE		0b00
+#define		I2X_LIT_DEC_BE		0b01
+#define		I2X_LIT_HEX_LE		0b10
+#define		I2X_LIT_HEX_BE		0b11
 };
 
 struct i2x_regrange {
@@ -44,17 +44,16 @@ struct i2x_msg {
 	uint8_t				*buf;
 	size_t				len;
 	uint16_t			flags;
-#define F_MSG_RD	(1 << 0)
-#define F_MSG_PAUSE	(1 << 1)
-#define F_MSG_STOP	(1 << 8)
-#define F_MSG_SR	(1 << 9)
-#define F_MSG_REG	(1 << 10)
+#define 	I2X_MSG_RD		(1 << 0)
+#define 	I2X_MSG_PAUSE		(1 << 1)
+#define 	I2X_MSG_STOP		(1 << 8)
+#define 	I2X_MSG_SR		(1 << 9)
+#define 	I2X_MSG_REG		(1 << 10)
 };
 
 struct i2x_segment {
 	struct i2c_rdwr_ioctl_data	msgset;
 	uint16_t			*msgflags;
-	uint32_t			flags;
 	uint32_t			delay;
 };
 
@@ -67,6 +66,13 @@ struct i2x_cmd {
 struct i2x_prog {
 	struct i2x_target		*target;
 	struct i2x_list			*cmd_list;
+
+	int				verbose;
+	int				dry_run;
+	int				tree;
+	enum {
+		HEX, PLAIN, DEC, RAW
+	}				output_format;	
 };
 
 struct i2x_cmd *i2x_cmd_make(struct i2x_list *msg_list,
@@ -95,4 +101,11 @@ void i2x_list_free(struct i2x_list *list);
 
 void i2x_exec_prog(struct i2x_prog *prog);
 
-void yyerror(void *scanner, void **prog, char *s);
+void yyerror(void *scanner, void *prog, char *s);
+
+/* add 1 with carry and wrap around (unsigned) */
+void incn(uint8_t *n, int width, int big_endian);
+
+void i2x_dump_tree(struct i2x_prog *prog);
+
+void i2x_exec_prog(struct i2x_prog *prog);

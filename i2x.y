@@ -10,7 +10,7 @@
 %}
 
 %lex-param {void *scanner}
-%parse-param {void *scanner} {void **prog}
+%parse-param {void *scanner} {void *prog}
 
 %union {
 	struct i2x_target	*target;
@@ -34,12 +34,10 @@
 %%
 
 prog:	TARGET cmd_list			{
-	struct i2x_prog *p = malloc(sizeof(struct i2x_prog));
-	assert(p);
-	p->target = $1;
-	p->cmd_list = $2;
-	*prog = p;
-};
+		struct i2x_prog *p = prog;
+		p->target = $1;
+		p->cmd_list = $2;
+	};
 
 cmd_list: cmd				{
 		struct i2x_list *list = i2x_list_make();
@@ -59,7 +57,7 @@ cmd	: msg_list			{
 	};
 
 msg_list: msg				{
-		if ($1->flags & F_MSG_PAUSE)
+		if ($1->flags & I2X_MSG_PAUSE)
 			errx(1, "first message in a command cannot be a pause");
 		struct i2x_list *list = i2x_list_make();
 		$$ = i2x_list_extend(list, $1);
@@ -67,16 +65,16 @@ msg_list: msg				{
 	| msg_list msg			{
 		struct i2x_msg *m = i2x_list_get(i2x_msg, $1, $1->len - 1);
 		/* implicit: repeated start if RAW, else stop */
-		if (m->flags & F_MSG_RD || !($2->flags & F_MSG_RD))
-			m->flags |= F_MSG_STOP;
+		if (m->flags & I2X_MSG_RD || !($2->flags & I2X_MSG_RD))
+			m->flags |= I2X_MSG_STOP;
 		$$ = i2x_list_extend($1, $2);
 	}
 	| msg_list ',' msg		{
-		i2x_list_get(i2x_msg, $1, $1->len - 1)->flags |= F_MSG_SR;
+		i2x_list_get(i2x_msg, $1, $1->len - 1)->flags |= I2X_MSG_SR;
 		$$ = i2x_list_extend($1, $3);
 	}
 	| msg_list '.' msg		{
-		i2x_list_get(i2x_msg, $1, $1->len - 1)->flags |= F_MSG_STOP;
+		i2x_list_get(i2x_msg, $1, $1->len - 1)->flags |= I2X_MSG_STOP;
 		$$ = i2x_list_extend($1, $3);
 	};
 
@@ -84,10 +82,10 @@ msg	: WRITE data_expr		{
 		$$ = i2x_msg_make($2->buf, $2->len, 0);
 	}
 	| READ DECIMAL			{
-		$$ = i2x_msg_make(NULL, $2->val, F_MSG_RD);
+		$$ = i2x_msg_make(NULL, $2->val, I2X_MSG_RD);
 	}
 	| PAUSE DECIMAL			{
-		$$ = i2x_msg_make(NULL, $2->val, F_MSG_PAUSE);
+		$$ = i2x_msg_make(NULL, $2->val, I2X_MSG_PAUSE);
 	};
 
 data_expr
@@ -100,8 +98,7 @@ data_expr
 	};
 
 reg_spec: regrange_list			{ $$ = $1; }
-	| regrange_list ':'		{ $$ = $1; }
-	;
+	| regrange_list ':'		{ $$ = $1; };
 
 regrange_list
 	: regrange			{
@@ -126,5 +123,4 @@ regrange: const				{
 	};
 
 const	: PHEX				{ $$ = $1; }
-	| DECIMAL			{ $$ = $1; }
-	;
+	| DECIMAL			{ $$ = $1; };

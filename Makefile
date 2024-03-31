@@ -5,7 +5,7 @@ RM	= rm -f
 
 CFLAGS	= -g -Wall
 
-i2x: main.c i2x.c i2x.tab.c i2x.yy.c dump.c i2x.h i2x.tab.h i2x.yy.h dump.h
+i2x: main.c i2x.c i2x.tab.c i2x.yy.c tree.c exec.c i2x.h i2x.tab.h i2x.yy.h
 	$(CC) $(CFLAGS) -o $@ $(filter %.c, $^)
 
 

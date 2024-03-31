@@ -5,7 +5,7 @@
 
 #include "i2x.h"
 
-void iprintf(int indent, const char* fmt, ...)
+static void iprintf(int indent, const char* fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
@@ -14,39 +14,41 @@ void iprintf(int indent, const char* fmt, ...)
 	va_end(ap);
 }
 
-void dump_segment(struct i2x_segment *segment, int reg_width)
+static void dump_segment(struct i2x_segment *segment, int reg_width)
 {
-	iprintf(6, "i2x_segment [%d]\n", segment->msgset.nmsgs);
+	iprintf(8, "SEGMENT [%d]\n", segment->msgset.nmsgs);
 	for (size_t i = 0; i < segment->msgset.nmsgs; ++i) {
 		struct i2c_msg *msg = segment->msgset.msgs + i;
 		uint32_t flags = segment->msgflags[i];
-		iprintf(10, "i2c_msg [%s%3d]",
-			flags & F_MSG_RD ? "R" : "W", msg->len);
+		iprintf(10, "MSG [%s%3d]",
+			flags & I2X_MSG_RD ? "R" : "W", msg->len);
 
-		if (!(flags & F_MSG_RD)) {
+		if (!(flags & I2X_MSG_RD)) {
 			for (size_t j = 0; j < msg->len; ++j) {
-				if (j < reg_width && flags & F_MSG_REG)
+				if (j < reg_width && flags & I2X_MSG_REG)
 					printf(" rr");
 				else
 					printf(" %02hhx", msg->buf[j]);
 			}
 		}
-		puts("");
+		putchar('\n');
 	}
+	if (segment->delay)
+		iprintf(10, "(%4dms delay)\n", segment->delay);
 }
 
-void dump_segment_list(struct i2x_list *segment_list, int reg_width)
+static void dump_segment_list(struct i2x_list *segment_list, int reg_width)
 {
-	iprintf(6, "i2x_list(i2x_segment)\n");
+	iprintf(6, "SEGMENTS\n");
 	i2x_list_foreach (i2x_segment, segment, segment_list)
 		dump_segment(segment, reg_width);
 }
 
-void dump_reg_spec(struct i2x_list *reg_spec)
+static void dump_reg_spec(struct i2x_list *reg_spec)
 {
-	iprintf(6, "i2x_list(i2x_regrange)\n");
+	iprintf(6, "REGSPEC\n");
 	i2x_list_foreach (i2x_regrange, regrange, reg_spec) {
-		iprintf(8, "i2x_regrange [");
+		iprintf(6, "- REGRANGE [");
 		for (size_t j = 0; j < regrange->width; ++j)
 			printf("%02hhx", regrange->start[j]);
 		printf("-");
@@ -56,11 +58,11 @@ void dump_reg_spec(struct i2x_list *reg_spec)
 	}
 }
 
-void dump_cmd_list(struct i2x_list *cmd_list)
+static void dump_cmd_list(struct i2x_list *cmd_list)
 {
-	iprintf(2, "i2x_list(i2x_cmd)\n");
+	iprintf(2, "CMD_LIST\n");
 	i2x_list_foreach (i2x_cmd, cmd, cmd_list) {
-		iprintf(4, "i2x_cmd\n");
+		iprintf(2, "- CMD\n");
 		if (cmd->reg_spec)
 			dump_reg_spec(cmd->reg_spec);
 		size_t width = cmd->reg_spec ?
@@ -69,10 +71,10 @@ void dump_cmd_list(struct i2x_list *cmd_list)
 	}
 }
 
-void dump_prog(struct i2x_prog *prog)
+void i2x_dump_tree(struct i2x_prog *prog)
 {
-	iprintf(0, "i2x_prog\n");
-	iprintf(2, "i2x_target(bus=%"PRIu32", addr=%"PRIx8"\n",
+	iprintf(0, "PROG\n");
+	iprintf(2, "TARGET [bus=%"PRIu32" addr=%"PRIx8"]\n",
 		prog->target->bus, prog->target->address);
 	dump_cmd_list(prog->cmd_list);
 }

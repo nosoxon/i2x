@@ -51,6 +51,7 @@ static int next_tok_dec = 0;
 	return DECIMAL;
 }
 
+":"			return ':';
 "."			return '.';
 ","			return ',';
 "/"			return '/';
@@ -151,7 +152,7 @@ uint8_t *encode_dec(uint64_t val, int width, int big_endian)
 	return buf;
 }
 
-void yyerror(yyscan_t scanner, void **prog, char *s)
+void yyerror(yyscan_t scanner, void *prog, char *s)
 {
 	fprintf(stderr, "error: %s\n", s);
 }

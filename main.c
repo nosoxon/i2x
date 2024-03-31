@@ -1,47 +1,77 @@
 #include <assert.h>
+#include <err.h>
 #include <getopt.h>
 #include <string.h>
 
-#include "dump.h"
+#include "i2x.h"
 #include "i2x.tab.h"
 #include "i2x.yy.h"
 
 static const struct option longopts[] = {
-	{ "hex",   no_argument, NULL, 'x' },
-	{ "dec",   no_argument, NULL, 'd' },
-	{ "raw",   no_argument, NULL, 'r' },
-	{ "plain", no_argument, NULL, 'p' },
+	{ "verbose", no_argument, NULL, 'v' },
+	{ "dry-run", no_argument, NULL, 'n' },
+	{ "tree",    no_argument, NULL, 't' },
+	{ "hex",     no_argument, NULL, 'x' },
+	{ "plain",   no_argument, NULL, 'p' },
+	{ "dec",     no_argument, NULL, 'd' },
+	{ "raw",     no_argument, NULL, 'r' },
+	{ NULL, 0, NULL, 0}
 };
 
-#define F_FMT_HEX	1
-#define F_FMT_DEC	2
-#define F_FMT_RAW	3
-#define F_FMT_PLAIN	4
 
 int main(int argc, char **argv)
 {
-	int output_format = F_FMT_HEX;
+	struct i2x_prog *program = malloc(sizeof(struct i2x_prog));
+	assert(program);
+
+	program->verbose = 0;
+	program->output_format = HEX;
 
 	char c;
-	while ((c = getopt_long(argc, argv, "+xdrp", longopts, NULL) != -1)) {
+	while ((c = getopt_long(argc, argv, "+vntxpdr",
+				longopts, NULL)) != -1) {
 		switch (c) {
+		case 'v':
+			++program->verbose;
+			break;
+		case 'n':
+			program->dry_run = 1;
+			break;
+		case 't':
+			program->tree = 1;
+			break;
 		case 'x':
-			output_format = F_FMT_HEX;
-			break;
-		case 'd':
-			output_format = F_FMT_DEC;
-			break;
-		case 'r':
-			output_format = F_FMT_RAW;
+			program->output_format = HEX;
 			break;
 		case 'p':
-			output_format = F_FMT_PLAIN;
+			program->output_format = PLAIN;
 			break;
+		case 'd':
+			program->output_format = DEC;
+			break;
+		case 'r':
+			program->output_format = RAW;
+			break;
+		case '?':
+			/* TODO maybe some more help */
+			exit(1);
 		}
 	}
 
+	/* 
+	 * potentially could verbose to stderr, but probably defeats the purpose
+	 * of raw output
+	 */
+	if (program->verbose && program->output_format == RAW)
+		errx(1, "raw output precludes verbosity");
+	if (program->verbose && program->output_format == PLAIN)
+		errx(1, "plain hex output precludes verbosity");
+	/* dry run implies verbose */
+	if (program->dry_run && !program->verbose)
+		program->verbose = 1;
+
 	size_t len = 0;
-	for (int i = 1; i < argc; ++i)
+	for (int i = optind; i < argc; ++i)
 		len += strlen(argv[i]) + 1;
 
 	char *raw_input = malloc(len);
@@ -49,31 +79,32 @@ int main(int argc, char **argv)
 	assert(raw_input);
 
 	size_t n = 0;
-	for (int i = 1; i < argc; ++i) {
-		if (i != 1) {
-			strcat(raw_input, " ");
-			++n;
-		}
+	for (int i = optind; i < argc; ++i) {
+		strcat(raw_input, " ");
 		strcat(raw_input, argv[i]);
-		n += strlen(argv[i]);
+		n += 1 + strlen(argv[i]);
 	}
-	printf("read: `%s'\n", raw_input);
 
-	struct i2x_prog *program;
+	if (program->verbose)
+		printf("read: `%s'\n", raw_input + 1);
 
 	yyscan_t scanner;
 	yylex_init(&scanner);
 
 	yy_scan_string(raw_input, scanner);
-	yyparse(scanner, (void **) &program);
+	int ret = yyparse(scanner, (void *) program);
+	printf("yyparse = %d\n", ret);
+	if (ret)
+		errx(1, "failed to parse program");
 
 	yylex_destroy(scanner);
 
-	printf("\nDEBUG DUMP\n");
-	dump_prog(program);
+	if (program->tree)
+		i2x_dump_tree(program);
+	else
+		i2x_exec_prog(program);
 
-	printf("\nBEGIN EXECUTE\n");
-	i2x_exec_prog(program);
-	// yy_delete_buffer(YY_CURRENT_BUFFER);
+	/* free(options); */
+	/* yy_delete_buffer(YY_CURRENT_BUFFER); */
 }
 
