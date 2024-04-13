@@ -54,7 +54,7 @@ static void dump_reg_spec(struct i2x_list *reg_spec)
 		printf("-");
 		for (size_t j = 0; j < regrange->width; ++j)
 			printf("%02hhx", regrange->stop[j]);
-		puts("]");
+		puts(")");
 	}
 }
 

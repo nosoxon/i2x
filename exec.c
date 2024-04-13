@@ -85,19 +85,14 @@ static void print_segment(struct i2x_prog *p, struct i2x_segment *segment,
 
                 switch(p->output_format) {
                 case HEX:
-                        print_prefix(p, segment, i, addr);
-                        if (p->dry_run && segment->msgflags[i] & I2X_MSG_RD)
-                                print_filler(msg->len, "..");
-                        else
-                                print_bytes(msg->buf, msg->len, "%02"PRIx8,
-                                            1, !p->verbose);
-                        break;
                 case DEC:
+                        int hex = p->output_format == HEX;
                         print_prefix(p, segment, i, addr);
                         if (p->dry_run && segment->msgflags[i] & I2X_MSG_RD)
-                                print_filler(msg->len, "...");
+                                print_filler(msg->len, hex ? ".." : "...");
                         else
-                                print_bytes(msg->buf, msg->len, "%3"PRIu8,
+                                print_bytes(msg->buf, msg->len,
+                                            hex ? "%02"PRIx8 : "%3"PRIu8,
                                             1, !p->verbose);
                         break;
                 /* no verbosity */
