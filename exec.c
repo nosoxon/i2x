@@ -53,54 +53,72 @@ static void print_bytes(uint8_t *buf, size_t len, char *fmt,
                 putchar('\n');
 }
 
+static void print_filler(size_t len, char *fill)
+{
+        while (len--)
+                printf("%s%s", fill, len ? " " : "");
+}
+
 static void print_prefix(struct i2x_prog *p,
-                         struct i2x_segment *segment, size_t i)
+                         struct i2x_segment *segment, size_t i, uint16_t addr)
 {
         if (p->verbose) {
+                printf("%02"PRIx8":", addr & 0xff);
                 printf(segment->msgflags[i] & I2X_MSG_RD ? "R " : "W ");
-                return;
-        }
-
-        if (i > 0 && segment->msgflags[i - 1] & I2X_MSG_REG) {
+        } else if (i > 0 && segment->msgflags[i - 1] & I2X_MSG_REG) {
                 print_bytes(segment->msgset.msgs[i - 1].buf,
                             segment->msgset.msgs[i - 1].len, "%"PRIx8, 1, 0);
                 printf(": ");
         }
 }
 
-static void print_segment(struct i2x_prog *p, struct i2x_segment *segment)
+static void print_segment(struct i2x_prog *p, struct i2x_segment *segment,
+                          uint16_t addr)
 {
 	for (size_t i = 0; i < segment->msgset.nmsgs; ++i) {
 		struct i2c_msg *msg = segment->msgset.msgs + i;
                 // uint32_t flags = segment->msgflags[i];
 		if (!(segment->msgflags[i] & I2X_MSG_RD) && !p->verbose)
 			continue;
+                if (p->verbose && !i)
+                        printf("S  ");
 
                 switch(p->output_format) {
                 case HEX:
-                        print_prefix(p, segment, i);
-                        print_bytes(msg->buf, msg->len, "%02"PRIx8, 1, 1);
+                        print_prefix(p, segment, i, addr);
+                        if (p->dry_run && segment->msgflags[i] & I2X_MSG_RD)
+                                print_filler(msg->len, "..");
+                        else
+                                print_bytes(msg->buf, msg->len, "%02"PRIx8,
+                                            1, !p->verbose);
                         break;
+                case DEC:
+                        print_prefix(p, segment, i, addr);
+                        if (p->dry_run && segment->msgflags[i] & I2X_MSG_RD)
+                                print_filler(msg->len, "...");
+                        else
+                                print_bytes(msg->buf, msg->len, "%3"PRIu8,
+                                            1, !p->verbose);
+                        break;
+                /* no verbosity */
                 case PLAIN:
                         print_bytes(msg->buf, msg->len, "%02"PRIx8, 0, 0);
                         break;
-                case DEC:
-                        print_prefix(p, segment, i);
-                        print_bytes(msg->buf, msg->len, "%3"PRIu8, 1, 1);
-                        break;
                 case RAW:
-                        /* TODO buffer this if high-volume is ever a use-case,
-                         *      otherwise too much context switching
-                         */
                         write(STDOUT_FILENO, msg->buf, msg->len);
                         break;
                 }
+
+                if (p->verbose)
+                        printf(i < segment->msgset.nmsgs - 1
+                                ? "\nSr " : " P\n\n");
 	}
 }
 
 static void exec_segment(struct i2x_prog *p, struct i2x_segment *segment,
                          uint16_t addr, uint8_t *reg, size_t reg_width)
 {
+        /* set address, fill in registers, zero read buffers */
 	for (size_t i = 0; i < segment->msgset.nmsgs; ++i) {
 		struct i2c_msg *msg = segment->msgset.msgs + i;
 
@@ -111,10 +129,12 @@ static void exec_segment(struct i2x_prog *p, struct i2x_segment *segment,
 			memcpy(msg->buf, reg, reg_width);
 	}
 
-	if (dummy_ioctl(0, I2C_RDWR, &segment->msgset))
-		errx(1, "oh no! ioctl failed!");
+        if (!p->dry_run) {
+                if (dummy_ioctl(0, I2C_RDWR, &segment->msgset))
+                        errx(1, "oh no! ioctl failed!");
+        }
 
-        print_segment(p, segment);
+        print_segment(p, segment, addr);
 	if (segment->delay)
 		usleep(1000 * segment->delay);
 }

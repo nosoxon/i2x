@@ -109,8 +109,6 @@ struct i2x_list *i2x_cmd_segment(struct i2x_list *msg_list,
 			next_segment = k + 1;
 		}
 		++k;
-		// fill in spots for reg
-		// msg metadata (delays, read format, ...) how???
 	}
 
 	return segment_list;

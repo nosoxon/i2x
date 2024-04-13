@@ -106,9 +106,9 @@ regrange_list
 		$$ = i2x_list_extend(list, $1);
 	}
 	| regrange_list ',' regrange	{
-		/* ensure all register ranges within a regspec are of equal width */
 		if ($3->width != i2x_list_get(i2x_regrange, $1, 0)->width)
-			errx(1, "register ranges must be of explicit equal width");
+			errx(1, "register ranges within the same command "
+				"must be of explicit equal width");
 		$$ = i2x_list_extend($1, $3);
 	};
 

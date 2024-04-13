@@ -58,17 +58,17 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/* dry run implies verbose */
+	if (program->dry_run && !program->verbose)
+		program->verbose = 1;
 	/* 
 	 * potentially could verbose to stderr, but probably defeats the purpose
 	 * of raw output
 	 */
 	if (program->verbose && program->output_format == RAW)
-		errx(1, "raw output precludes verbosity");
+		errx(1, "raw output precludes verbosity and dry runs");
 	if (program->verbose && program->output_format == PLAIN)
-		errx(1, "plain hex output precludes verbosity");
-	/* dry run implies verbose */
-	if (program->dry_run && !program->verbose)
-		program->verbose = 1;
+		errx(1, "plain hex output precludes verbosity and dry runs");
 
 	size_t len = 0;
 	for (int i = optind; i < argc; ++i)
@@ -93,9 +93,8 @@ int main(int argc, char **argv)
 
 	yy_scan_string(raw_input, scanner);
 	int ret = yyparse(scanner, (void *) program);
-	printf("yyparse = %d\n", ret);
 	if (ret)
-		errx(1, "failed to parse program");
+		errx(1, "failed to parse program (%d)", ret);
 
 	yylex_destroy(scanner);
 
@@ -108,3 +107,9 @@ int main(int argc, char **argv)
 	/* yy_delete_buffer(YY_CURRENT_BUFFER); */
 }
 
+static const char invocation[] = "i2x";
+
+static void usage()
+{
+	
+}

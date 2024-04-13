@@ -14,24 +14,24 @@ DEC		0|[1-9]{D}*
 void parse_target();
 int parse_plain_hex();
 void parse_decimal();
-
-static int next_tok_dec = 0;
 %}
+
+/* start conditions */
+%x decimal_length
 
 %option reentrant bison-bridge
 %option noyywrap nounput noinput
-/*%option noyywrap nounput noinput nodefault*/
-/*%option noyyalloc noyyrealloc noyyfree*/
+/*%option nodefault noyyalloc noyyrealloc noyyfree*/
 
 %%
 
 "w"			return WRITE;
 "r"			{
-	next_tok_dec = 1;
+	BEGIN(decimal_length);
 	return READ;
 }
 "t"			{
-	next_tok_dec = 1;
+	BEGIN(decimal_length);
 	return PAUSE;
 }
 
@@ -43,11 +43,12 @@ static int next_tok_dec = 0;
 {H}+			{
 	if (parse_plain_hex(yyscanner))
 		return PHEX;
-	REJECT
+	REJECT;
 }
 
-([1-8]?{IS})?{DEC}	{
-	parse_decimal(yyscanner);
+<*>([1-8]?{IS})?{DEC}	{
+	parse_decimal(yyscanner, YY_START == decimal_length);
+	BEGIN(INITIAL);
 	return DECIMAL;
 }
 
@@ -57,7 +58,7 @@ static int next_tok_dec = 0;
 "/"			return '/';
 "-"			return '-';
 
-[ \t\v\n\f]		/* snarf */
+<*>[ \t\v\n\f]		/* snarf */
 .			errx(1, "unexpected token encountered");
 
 %%
@@ -70,10 +71,9 @@ uint8_t *encode_dec(uint64_t val, int width, int big_endian);
 
 int parse_plain_hex(yyscan_t scanner)
 {
-	if (next_tok_dec || yyget_leng(scanner) % 2) {
-		if (!next_tok_dec && yyget_leng(scanner) > 2)
-			warnx("warning: literal `%s' will not be parsed as hex",
-			      yyget_text(scanner));
+	if (yyget_leng(scanner) % 2) {
+		warnx("warning: literal `%s' will not be parsed as hex",
+		      yyget_text(scanner));
 		return 0;
 	}
 
@@ -94,7 +94,7 @@ int parse_plain_hex(yyscan_t scanner)
 	return 1;
 }
 
-void parse_decimal(yyscan_t scanner)
+void parse_decimal(yyscan_t scanner, int is_length)
 {
 	char *text = yyget_text(scanner);
 	uint8_t width = 1;
@@ -115,13 +115,12 @@ void parse_decimal(yyscan_t scanner)
 	uint64_t val = strtoull(text + pos, NULL, 10);
 
 	struct i2x_literal *literal = malloc(sizeof(struct i2x_literal));
-	literal->buf = next_tok_dec ? NULL : encode_dec(val, width, big_endian);
+	literal->buf = is_length ? NULL : encode_dec(val, width, big_endian);
 	literal->len = width;
 	literal->val = val;
 	literal->type = big_endian ? I2X_LIT_DEC_BE : I2X_LIT_DEC_LE;
 
 	(*yyget_lval(scanner)).literal = literal;
-	next_tok_dec = 0;
 }
 
 void parse_target(yyscan_t scanner)

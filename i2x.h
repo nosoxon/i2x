@@ -48,6 +48,7 @@ struct i2x_msg {
 #define 	I2X_MSG_PAUSE		(1 << 1)
 #define 	I2X_MSG_STOP		(1 << 8)
 #define 	I2X_MSG_SR		(1 << 9)
+/* set on any message that should have register filled in */
 #define 	I2X_MSG_REG		(1 << 10)
 };
 
