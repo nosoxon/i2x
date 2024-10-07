@@ -6,13 +6,11 @@
 #include <unistd.h>
 
 #include "i2x.h"
+#include "config.h"
 
-#define DEBUG(args...)	printf(args)
-#define DEBUG(args...)	{}
-
-/* https://elixir.bootlin.com/linux/latest/source/drivers/i2c/i2c-dev.c#L235 */
+/* https://elixir.bootlin.com/linux/v6.11/C/ident/i2cdev_ioctl_rdwr */
 static int dummy_ioctl(int _fd, unsigned long _req,
-		struct i2c_rdwr_ioctl_data *msgset)
+		       struct i2c_rdwr_ioctl_data *msgset)
 {
 	static size_t ri = 0;
 	static char random_data[] = {
@@ -23,9 +21,9 @@ static int dummy_ioctl(int _fd, unsigned long _req,
 	};
 
 	for (size_t i = 0; i < msgset->nmsgs; ++i) {
-		DEBUG("  ioctl(%s) [%2d] :",
-		      msgset->msgs[i].flags & I2C_M_RD ? "R" : "W",
-		      msgset->msgs[i].len);
+		dbprintf("  ioctl(%s) [%2d] :",
+		         msgset->msgs[i].flags & I2C_M_RD ? "R" : "W",
+		         msgset->msgs[i].len);
 		for (size_t j = 0; j < msgset->msgs[i].len; ++j) {
 			if (msgset->msgs[i].flags & I2C_M_RD)
 				msgset->msgs[i].buf[j] = random_data[(j + ri) % 32];
@@ -33,9 +31,9 @@ static int dummy_ioctl(int _fd, unsigned long _req,
 				random_data[ri] ^= msgset->msgs[i].buf[j];
 
 			ri = (ri + 1) % 32;
-			DEBUG(" %02hhx", msgset->msgs[i].buf[j]);
+			dbprintf(" %02hhx", msgset->msgs[i].buf[j]);
 		}
-		DEBUG("\n");
+		dbprintf("\n");
 	}
 
 	return 0;

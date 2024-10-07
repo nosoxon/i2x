@@ -20,6 +20,10 @@ Options:
   -x, --hex        pretty print responses in hex (default)
   -p, --plain      print responses in plain hex format
   -r, --raw        output raw response data
+
   -v, --verbose    show more details
   -n, --dry-run    don't dispatch messages, implies --verbose
   -t, --tree       just show parse tree
+  -h, --help       display this help
+
+For more details see i2x(8)
