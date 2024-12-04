@@ -1,9 +1,10 @@
 #pragma once
 
-#define DEBUG   0
+#define DUMMY_IOCTL 0
+#define DEBUG 1
 #define VERSION "unknown"
 
-#ifdef DEBUG
+#if DEBUG == 1
 #define dbprintf(args...)       printf(args)
 #else
 #define dbprintf(args...)	{}

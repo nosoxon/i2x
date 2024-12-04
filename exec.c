@@ -1,8 +1,10 @@
 #include <err.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #include "i2x.h"
@@ -10,7 +12,7 @@
 
 /* https://elixir.bootlin.com/linux/v6.11/C/ident/i2cdev_ioctl_rdwr */
 static int dummy_ioctl(int _fd, unsigned long _req,
-		       struct i2c_rdwr_ioctl_data *msgset)
+                       struct i2c_rdwr_ioctl_data *msgset)
 {
 	static size_t ri = 0;
 	static char random_data[] = {
@@ -43,31 +45,31 @@ static void print_bytes(uint8_t *buf, size_t len, char *fmt,
                         int space, int newline)
 {
 	for (size_t i = 0; i < len; ++i) {
-                printf(fmt, buf[i]);
-                if (space && i < len - 1)
-                        putchar(' ');
-        }
-        if (newline)
-                putchar('\n');
+		printf(fmt, buf[i]);
+		if (space && i < len - 1)
+			putchar(' ');
+	}
+	if (newline)
+		putchar('\n');
 }
 
 static void print_filler(size_t len, char *fill)
 {
-        while (len--)
-                printf("%s%s", fill, len ? " " : "");
+	while (len--)
+		printf("%s%s", fill, len ? " " : "");
 }
 
 static void print_prefix(struct i2x_prog *p,
                          struct i2x_segment *segment, size_t i, uint16_t addr)
 {
-        if (p->verbose) {
-                printf("%02"PRIx8":", addr & 0xff);
-                printf(segment->msgflags[i] & I2X_MSG_RD ? "R " : "W ");
-        } else if (i > 0 && segment->msgflags[i - 1] & I2X_MSG_REG) {
-                print_bytes(segment->msgset.msgs[i - 1].buf,
-                            segment->msgset.msgs[i - 1].len, "%"PRIx8, 1, 0);
-                printf(": ");
-        }
+	if (p->verbose) {
+		printf("%02"PRIx8":", addr & 0xff);
+		printf(segment->msgflags[i] & I2X_MSG_RD ? "R " : "W ");
+	} else if (i > 0 && segment->msgflags[i - 1] & I2X_MSG_REG) {
+		print_bytes(segment->msgset.msgs[i - 1].buf,
+		            segment->msgset.msgs[i - 1].len, "%02"PRIx8, 0, 0);
+		printf(": ");
+	}
 }
 
 static void print_segment(struct i2x_prog *p, struct i2x_segment *segment,
@@ -75,59 +77,68 @@ static void print_segment(struct i2x_prog *p, struct i2x_segment *segment,
 {
 	for (size_t i = 0; i < segment->msgset.nmsgs; ++i) {
 		struct i2c_msg *msg = segment->msgset.msgs + i;
-                // uint32_t flags = segment->msgflags[i];
+		// uint32_t flags = segment->msgflags[i];
 		if (!(segment->msgflags[i] & I2X_MSG_RD) && !p->verbose)
 			continue;
-                if (p->verbose && !i)
-                        printf("S  ");
+		if (p->verbose && !i)
+			printf("S  ");
 
-                switch(p->output_format) {
-                case HEX:
-                case DEC:
-                        int hex = p->output_format == HEX;
-                        print_prefix(p, segment, i, addr);
-                        if (p->dry_run && segment->msgflags[i] & I2X_MSG_RD)
-                                print_filler(msg->len, hex ? ".." : "...");
-                        else
-                                print_bytes(msg->buf, msg->len,
-                                            hex ? "%02"PRIx8 : "%3"PRIu8,
-                                            1, !p->verbose);
+		switch(p->output_format) {
+		case HEX:
+		case DEC:
+			int hex = p->output_format == HEX;
+			print_prefix(p, segment, i, addr);
+			if (p->dry_run && segment->msgflags[i] & I2X_MSG_RD)
+				print_filler(msg->len, hex ? ".." : "...");
+			else
+				print_bytes(msg->buf, msg->len,
+				            hex ? "%02"PRIx8 : "%3"PRIu8,
+				            1, !p->verbose);
                         break;
-                /* no verbosity */
-                case PLAIN:
-                        print_bytes(msg->buf, msg->len, "%02"PRIx8, 0, 0);
-                        break;
-                case RAW:
-                        write(STDOUT_FILENO, msg->buf, msg->len);
-                        break;
-                }
+		/* no verbosity */
+		case PLAIN:
+			print_bytes(msg->buf, msg->len, "%02"PRIx8, 0, 0);
+			break;
+		case RAW:
+			write(STDOUT_FILENO, msg->buf, msg->len);
+			break;
+		}
 
-                if (p->verbose)
-                        printf(i < segment->msgset.nmsgs - 1
-                                ? "\nSr " : " P\n\n");
+		if (p->verbose)
+			printf(i < segment->msgset.nmsgs - 1
+				? "\nSr " : " P\n\n");
 	}
 }
 
 static void exec_segment(struct i2x_prog *p, struct i2x_segment *segment,
-                         uint16_t addr, uint8_t *reg, size_t reg_width)
+                         uint8_t *reg, size_t reg_width)
 {
         /* set address, fill in registers, zero read buffers */
 	for (size_t i = 0; i < segment->msgset.nmsgs; ++i) {
 		struct i2c_msg *msg = segment->msgset.msgs + i;
 
-		msg->addr = addr;
+		msg->addr = p->target->address;
 		if (segment->msgflags[i] & I2X_MSG_RD)
 			explicit_bzero(msg->buf, msg->len);
 		if (segment->msgflags[i] & I2X_MSG_REG)
 			memcpy(msg->buf, reg, reg_width);
 	}
 
-        if (!p->dry_run) {
-                if (dummy_ioctl(0, I2C_RDWR, &segment->msgset))
-                        errx(1, "oh no! ioctl failed!");
-        }
+	if (!p->dry_run) {
+#if DUMMY_IOCTL == 1
+		if (dummy_ioctl(0, I2C_RDWR, &segment->msgset))
+#else
+		char dev_path[32] = {0};
+		snprintf(dev_path, sizeof(dev_path),
+			 "/dev/i2c-%d", p->target->bus);
+		int fd = open(dev_path, O_RDWR);
+		assert(fd > 0);
+		if (ioctl(fd, I2C_RDWR, &segment->msgset) < 0)
+#endif
+			errx(1, "oh no! ioctl failed!");
+	}
 
-        print_segment(p, segment, addr);
+	print_segment(p, segment, p->target->address);
 	if (segment->delay)
 		usleep(1000 * segment->delay);
 }
@@ -136,7 +147,7 @@ static void exec_segment_list(struct i2x_prog *p, struct i2x_list *segment_list,
                               uint8_t *reg, size_t reg_width)
 {
 	i2x_list_foreach (i2x_segment, segment, segment_list)
-		exec_segment(p, segment, 0, reg, reg_width);
+		exec_segment(p, segment, reg, reg_width);
 }
 
 static void exec_cmd(struct i2x_prog *p, struct i2x_cmd *cmd)

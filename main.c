@@ -64,7 +64,7 @@ int main(int argc, char **argv)
 	program->verbose = 0;
 	program->output_format = HEX;
 
-	char c;
+	signed char c;
 	while ((c = getopt_long(argc, argv, "+dxprvnth",
 				longopts, NULL)) != -1) {
 		switch (c) {
